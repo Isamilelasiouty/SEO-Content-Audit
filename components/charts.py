@@ -64,7 +64,7 @@ def _base_layout(**overrides) -> dict:
 
 def relevance_histogram(df: pd.DataFrame) -> go.Figure:
     """Histogram of opportunity relevance scores (new suggestions only)."""
-    data = df[~df["is_duplicate"]]["relevance_score"] if "is_duplicate" in df.columns else df["relevance_score"]
+   data = df[df["Type"] == "new"]["Relevance"] if "Type" in df.columns else df.get("Relevance", df.get("relevance_score", []))
 
     fig = go.Figure()
     fig.add_trace(go.Histogram(
