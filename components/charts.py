@@ -64,7 +64,17 @@ def _base_layout(**overrides) -> dict:
 
 def relevance_histogram(df: pd.DataFrame) -> go.Figure:
     """Histogram of opportunity relevance scores (new suggestions only)."""
-   data = df[df["Type"] == "new"]["Relevance"] if "Type" in df.columns else df.get("Relevance", df.get("relevance_score", []))
+    # Support both raw column names and renamed display columns
+    if "Type" in df.columns and "Relevance" in df.columns:
+        data = df[df["Type"] == "new"]["Relevance"]
+    elif "is_duplicate" in df.columns and "relevance_score" in df.columns:
+        data = df[~df["is_duplicate"]]["relevance_score"]
+    elif "Relevance" in df.columns:
+        data = df["Relevance"]
+    elif "relevance_score" in df.columns:
+        data = df["relevance_score"]
+    else:
+        return _empty_fig("No relevance data available")
 
     fig = go.Figure()
     fig.add_trace(go.Histogram(
@@ -101,7 +111,6 @@ def pagerank_bar(top_pages: list[dict], max_items: int = 10) -> go.Figure:
     values = [p["pagerank"] for p in items]
     full_urls = [p["url"] for p in items]
 
-    # Colour gradient: higher PR = brighter accent
     max_v = max(values) or 1
     colours = [
         f"rgba(0,212,255,{0.3 + 0.7 * (v / max_v):.2f})"
@@ -128,7 +137,7 @@ def pagerank_bar(top_pages: list[dict], max_items: int = 10) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
-# 3. Link opportunity scatter (semantic_overlap vs relevance_score)
+# 3. Link opportunity scatter
 # ---------------------------------------------------------------------------
 
 def opportunity_scatter(df: pd.DataFrame) -> go.Figure:
@@ -136,57 +145,66 @@ def opportunity_scatter(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return _empty_fig("No opportunities to plot")
 
-    new_df  = df[~df["is_duplicate"]] if "is_duplicate" in df.columns else df
-    dup_df  = df[df["is_duplicate"]]  if "is_duplicate" in df.columns else pd.DataFrame()
+    # Support both raw and renamed columns
+    if "Type" in df.columns and "Overlap" in df.columns and "Relevance" in df.columns:
+        new_df = df[df["Type"] == "new"]
+        dup_df = df[df["Type"] == "existing"]
+        x_col, y_col = "Overlap", "Relevance"
+        src_col = "Source Page" if "Source Page" in df.columns else None
+        tgt_col = "Target Page" if "Target Page" in df.columns else None
+        anc_col = "Anchor Text" if "Anchor Text" in df.columns else None
+    elif "is_duplicate" in df.columns:
+        new_df = df[~df["is_duplicate"]]
+        dup_df = df[df["is_duplicate"]]
+        x_col, y_col = "semantic_overlap", "relevance_score"
+        src_col, tgt_col, anc_col = "source_url", "target_url", "anchor_text"
+    else:
+        new_df = df
+        dup_df = pd.DataFrame()
+        x_col = "Overlap" if "Overlap" in df.columns else "semantic_overlap"
+        y_col = "Relevance" if "Relevance" in df.columns else "relevance_score"
+        src_col = tgt_col = anc_col = None
 
     fig = go.Figure()
 
-    if not new_df.empty:
-        fig.add_trace(go.Scatter(
-            x=new_df["semantic_overlap"],
-            y=new_df["relevance_score"],
-            mode="markers",
-            name="New opportunity",
-            marker=dict(
-                color=PALETTE["accent"],
-                size=8,
-                opacity=0.75,
-                line=dict(color=PALETTE["bg"], width=1),
-            ),
-            customdata=new_df[["source_url", "target_url", "anchor_text"]].values,
-            hovertemplate=(
+    if not new_df.empty and x_col in new_df.columns and y_col in new_df.columns:
+        custom = None
+        if src_col and tgt_col and anc_col and all(c in new_df.columns for c in [src_col, tgt_col, anc_col]):
+            custom = new_df[[src_col, tgt_col, anc_col]].values
+            hover = (
                 "<b>Anchor:</b> %{customdata[2]}<br>"
                 "<b>From:</b> %{customdata[0]}<br>"
                 "<b>To:</b> %{customdata[1]}<br>"
                 "Overlap: %{x:.3f} | Relevance: %{y:.3f}<extra></extra>"
-            ),
+            )
+        else:
+            hover = "Overlap: %{x:.3f} | Relevance: %{y:.3f}<extra></extra>"
+
+        fig.add_trace(go.Scatter(
+            x=new_df[x_col],
+            y=new_df[y_col],
+            mode="markers",
+            name="New opportunity",
+            marker=dict(color=PALETTE["accent"], size=8, opacity=0.75, line=dict(color=PALETTE["bg"], width=1)),
+            customdata=custom,
+            hovertemplate=hover,
         ))
 
-    if not dup_df.empty:
+    if not dup_df.empty and x_col in dup_df.columns and y_col in dup_df.columns:
         fig.add_trace(go.Scatter(
-            x=dup_df["semantic_overlap"],
-            y=dup_df["relevance_score"],
+            x=dup_df[x_col],
+            y=dup_df[y_col],
             mode="markers",
             name="Existing link",
-            marker=dict(
-                color=PALETTE["text_muted"],
-                size=6,
-                opacity=0.4,
-                symbol="x",
-            ),
-            hovertemplate="Existing: %{customdata[0]}<extra></extra>",
-            customdata=dup_df[["anchor_text"]].values,
+            marker=dict(color=PALETTE["text_muted"], size=6, opacity=0.4, symbol="x"),
+            hovertemplate="Existing link<extra></extra>",
         ))
 
     fig.update_layout(
         **_base_layout(title=dict(text="Opportunities: Overlap vs Relevance", font=dict(size=14, color=PALETTE["text"]))),
         xaxis=dict(**_AXIS_BASE, title=dict(text="Semantic Overlap", font=dict(color=PALETTE["text_muted"])), range=[-0.02, 1.02]),
-        yaxis=dict(**_AXIS_BASE, title=dict(text="Relevance Score",  font=dict(color=PALETTE["text_muted"])), range=[-0.02, 1.02]),
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            bordercolor=PALETTE["border"],
-            font=dict(color=PALETTE["text_muted"], size=11),
-        ),
+        yaxis=dict(**_AXIS_BASE, title=dict(text="Relevance Score", font=dict(color=PALETTE["text_muted"])), range=[-0.02, 1.02]),
+        legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=PALETTE["border"], font=dict(color=PALETTE["text_muted"], size=11)),
         height=320,
     )
     return fig
@@ -198,43 +216,43 @@ def opportunity_scatter(df: pd.DataFrame) -> go.Figure:
 
 def opps_per_page_bar(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
     """Bar chart — pages with most new linking opportunities."""
-    if df.empty or "is_duplicate" not in df.columns:
+    if df.empty:
         return _empty_fig("No data")
 
-    new_df = df[~df["is_duplicate"]]
+    # Support both raw and renamed columns
+    if "Type" in df.columns and "Source Page" in df.columns:
+        new_df = df[df["Type"] == "new"]
+        src_col = "Source Page"
+    elif "is_duplicate" in df.columns and "source_url" in df.columns:
+        new_df = df[~df["is_duplicate"]]
+        src_col = "source_url"
+    else:
+        return _empty_fig("No new opportunities found")
+
     if new_df.empty:
         return _empty_fig("No new opportunities found")
 
     counts = (
-        new_df.groupby("source_url")
+        new_df.groupby(src_col)
         .size()
         .sort_values(ascending=False)
         .head(top_n)
         .reset_index(name="count")
     )
-    counts["label"] = counts["source_url"].apply(_short_url)
+    counts["label"] = counts[src_col].apply(_short_url)
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=counts["label"],
         y=counts["count"],
-        marker=dict(
-            color=PALETTE["accent2"],
-            opacity=0.85,
-            line=dict(color=PALETTE["bg"], width=1),
-        ),
-        customdata=counts["source_url"].values,
+        marker=dict(color=PALETTE["accent2"], opacity=0.85, line=dict(color=PALETTE["bg"], width=1)),
+        customdata=counts[src_col].values,
         hovertemplate="<b>%{customdata}</b><br>Opportunities: %{y}<extra></extra>",
     ))
 
     fig.update_layout(
         **_base_layout(title=dict(text="New Opportunities by Source Page", font=dict(size=14, color=PALETTE["text"]))),
-        xaxis=dict(
-            showgrid=True, gridcolor=PALETTE["grid"], gridwidth=1,
-            zeroline=False, linecolor=PALETTE["border"],
-            tickangle=-35,
-            tickfont=dict(color=PALETTE["text_muted"], size=9),
-        ),
+        xaxis=dict(showgrid=True, gridcolor=PALETTE["grid"], zeroline=False, linecolor=PALETTE["border"], tickangle=-35, tickfont=dict(color=PALETTE["text_muted"], size=9)),
         yaxis=dict(**_AXIS_BASE, title=dict(text="Count", font=dict(color=PALETTE["text_muted"]))),
         height=300,
     )
@@ -242,28 +260,24 @@ def opps_per_page_bar(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
-# 5. Graph health donut (orphans / sinks / healthy)
+# 5. Graph health donut
 # ---------------------------------------------------------------------------
 
 def graph_health_donut(metrics: dict) -> go.Figure:
     """Donut chart showing page health breakdown."""
-    total    = metrics.get("total_pages", 0)
-    orphans  = metrics.get("orphan_count", 0)
-    sinks    = metrics.get("sink_count", 0)
-    healthy  = max(total - orphans - sinks, 0)
+    total   = metrics.get("total_pages", 0)
+    orphans = metrics.get("orphan_count", 0)
+    sinks   = metrics.get("sink_count", 0)
+    healthy = max(total - orphans - sinks, 0)
 
     if total == 0:
         return _empty_fig("No graph data")
 
-    labels = ["Healthy", "Orphan pages", "Sink pages"]
-    values = [healthy, orphans, sinks]
-    colours = [PALETTE["accent3"], PALETTE["danger"], PALETTE["warn"]]
-
     fig = go.Figure(go.Pie(
-        labels=labels,
-        values=values,
+        labels=["Healthy", "Orphan pages", "Sink pages"],
+        values=[healthy, orphans, sinks],
         hole=0.62,
-        marker=dict(colors=colours, line=dict(color=PALETTE["bg"], width=2)),
+        marker=dict(colors=[PALETTE["accent3"], PALETTE["danger"], PALETTE["warn"]], line=dict(color=PALETTE["bg"], width=2)),
         textfont=dict(color=PALETTE["text"], size=11),
         hovertemplate="%{label}: %{value} pages (%{percent})<extra></extra>",
     ))
@@ -278,11 +292,7 @@ def graph_health_donut(metrics: dict) -> go.Figure:
     fig.update_layout(
         **_base_layout(title=dict(text="Link Graph Health", font=dict(size=14, color=PALETTE["text"]))),
         showlegend=True,
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color=PALETTE["text_muted"], size=11),
-            orientation="v",
-        ),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=PALETTE["text_muted"], size=11), orientation="v"),
         height=280,
     )
     return fig
@@ -293,19 +303,12 @@ def graph_health_donut(metrics: dict) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def _short_url(url: str, max_len: int = 40) -> str:
-    """Strip scheme and trim for display."""
-    label = url.replace("https://", "").replace("http://", "")
+    label = str(url).replace("https://", "").replace("http://", "")
     return label if len(label) <= max_len else "…" + label[-(max_len - 1):]
 
 
 def _empty_fig(msg: str = "No data") -> go.Figure:
     fig = go.Figure()
-    fig.add_annotation(
-        text=msg,
-        x=0.5, y=0.5,
-        xref="paper", yref="paper",
-        showarrow=False,
-        font=dict(color=PALETTE["text_muted"], size=13),
-    )
+    fig.add_annotation(text=msg, x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False, font=dict(color=PALETTE["text_muted"], size=13))
     fig.update_layout(**_base_layout(), height=220)
     return fig
