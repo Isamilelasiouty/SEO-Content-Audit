@@ -420,22 +420,22 @@ with tab_charts:
         row1_l, row1_r = st.columns(2)
 
         with row1_l:
-            st.plotly_chart(relevance_histogram(all_opps_df), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(relevance_histogram(all_opps_df), use_container_width=True, config={"displayModeBar": False}, key="chart_relevance_hist")
 
         with row1_r:
-            st.plotly_chart(graph_health_donut(metrics), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(graph_health_donut(metrics), use_container_width=True, config={"displayModeBar": False}, key="chart_health_donut")
 
         row2_l, row2_r = st.columns(2)
 
         with row2_l:
-            st.plotly_chart(opportunity_scatter(all_opps_df), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(opportunity_scatter(all_opps_df), use_container_width=True, config={"displayModeBar": False}, key="chart_opp_scatter")
 
         with row2_r:
-            st.plotly_chart(opps_per_page_bar(all_opps_df), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(opps_per_page_bar(all_opps_df), use_container_width=True, config={"displayModeBar": False}, key="chart_opps_page")
 
         # PageRank bar full-width
         if metrics.get("top_pagerank_pages"):
-            st.plotly_chart(pagerank_bar(metrics["top_pagerank_pages"]), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(pagerank_bar(metrics["top_pagerank_pages"]), use_container_width=True, config={"displayModeBar": False}, key="chart_pr_bar_charts")
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -533,6 +533,7 @@ with tab_pagerank:
                 pagerank_bar(metrics.get("top_pagerank_pages", []), max_items=10),
                 use_container_width=True,
                 config={"displayModeBar": False},
+                key="chart_pr_bar_tab",
             )
 
         # Metrics row
